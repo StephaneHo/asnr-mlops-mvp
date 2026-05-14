@@ -103,3 +103,7 @@ redis-data/
 *.tmp
 *.bak
 .ipynb_checkpoints/
+
+# --- Artefacts de scripts d'exploration / debug ---
+sample_output.txt
+output*.txt
