@@ -1,0 +1,105 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+dist/
+build/
+*.pyc
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+build/
+.vite/
+.next/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# --- IDE / Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Secrets / Env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# --- Modèles ML (lourds, on ne commit JAMAIS) ---
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.ckpt
+models/
+.ollama/
+
+# --- Données (gérées par DVC, pas Git) ---
+data/raw/asnr/*
+data/processed/asnr/*
+data/golden/*
+!data/raw/asnr/.gitkeep
+!data/processed/asnr/.gitkeep
+!data/golden/.gitkeep
+!data/**/*.dvc
+*.parquet
+*.feather
+
+# --- MLflow ---
+mlruns/
+mlartifacts/
+
+# --- DVC ---
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+
+# --- Logs / Runtime ---
+*.log
+logs/
+*.pid
+
+# --- Docker volumes locaux ---
+.docker-volumes/
+postgres-data/
+minio-data/
+redis-data/
+
+# --- Divers ---
+*.tmp
+*.bak
+.ipynb_checkpoints/

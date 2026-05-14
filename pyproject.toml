@@ -1,0 +1,36 @@
+[project]
+name = "asnr-mlops-mvp"
+version = "0.1.0"
+description = "MLOps pipeline for anomaly extraction from ASNR inspection letters."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Stéphane Hordoir" }]
+
+# Les vraies dépendances seront déclarées dans chaque service (services/api, services/worker, services/ml).
+# Ce pyproject racine sert pour les outils transverses : ruff, mypy, pre-commit.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]  # line length: géré par formatter
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "unit: tests unitaires rapides",
+  "integration: tests d'intégration (bdd, services)",
+  "regression: tests de régression ML sur golden set",
+]
