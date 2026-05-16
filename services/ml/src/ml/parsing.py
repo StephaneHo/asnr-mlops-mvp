@@ -10,21 +10,42 @@ import pdfplumber
 # ---------------------------------------------------------------------------
 
 # --- split_sections() : titres des 4 sections principales ------------------
-PATTERN_SYNTHESE = r"SYNTHESE DE L[’']INSPECTION"
-PATTERN_SECTION_I = r"I\.\s+DEMANDES A TRAITER PRIORITAIREMENT"
-PATTERN_SECTION_II = r"II\.\s+AUTRES DEMANDES"
-PATTERN_SECTION_III = r"III\.\s+CONSTATS OU OBSERVATIONS N[’']APPELANT PAS DE REPONSE A L[’']ASNR"
+# Patterns tolérants aux variations entre :
+#   - ancien style ASN/EDF (sans accents : SYNTHESE, A TRAITER)
+#   - nouveau style ASNR (avec accents : SYNTHÈSE, À TRAITER)
+# `(?i)` rend les patterns case-insensitive : on accepte "SYNTHÈSE" (Penly),
+# "SYNTHESE" (ancien EDF) ET "Synthèse" (lettres MRS en mixed case).
+PATTERN_SYNTHESE = r"(?i)synth[èe]se\s+de\s+l[’']inspection"
+PATTERN_SECTION_I = r"(?i)I\.\s+demandes\s+[aà]\s+traiter\s+prioritairement"
+PATTERN_SECTION_II = r"(?i)II\.\s+autres\s+demandes"
+# Pour la section III on raccourcit le pattern à un préfixe stable :
+# "III. CONSTATS OU OBSERVATIONS N.APPELANT" suffit à identifier le titre
+# sans dépendre de la fin exacte. Le "." tolère l'apostrophe sous toutes ses
+# formes : ’ (typographique), ' (droite) ou � (lettre où l'encodage PDF a perdu
+# l'apostrophe).
+PATTERN_SECTION_III = r"III\.\s+CONSTATS\s+OU\s+OBSERVATIONS\s+N.APPELANT[^\n]*"
 
 # --- extract_header() : champs du bloc d'en-tête ---------------------------
 PATTERN_REFERENCE_COURRIER = r"Référence courrier\s*:\s*(\S+)"
 PATTERN_OBJET = r"Objet\s*:\s*(.+?)\nLettre de suite"
-PATTERN_N_DOSSIER = r"Inspection n°\s*(\S+)"
-PATTERN_DATE_LETTRE = r"À\s+\w+\s*,\s*le\s+(.+)"
-PATTERN_REFERENCES = r"\[\d+\]\s*-\s*[^\n]+"
+# N° dossier : on cherche directement le motif INSSN-XXX-YYYY-NNNN, présent
+# dans toutes les lettres quelle que soit l'étiquette ("Inspection n°",
+# "N° dossier (à rappeler dans toute correspondance) :", etc.).
+PATTERN_N_DOSSIER = r"\b(INSSN-[A-Z]{3}-\d{4}-\d{4})\b"
+# Date : le préfixe "À " est optionnel (ancien style "À Caen, le …" vs
+# nouveau style "Lyon, le …"). On capture la date en sortie.
+PATTERN_DATE_LETTRE = r"(?:À\s+)?\w+(?:[-\s]\w+)*\s*,\s*le\s+(.+)"
+# Références : le tiret entre [N] et le texte est optionnel.
+PATTERN_REFERENCES = r"\[\d+\]\s*-?\s*[^\n]+"
 
 # --- extract_items() : items à l'intérieur des sections --------------------
-PATTERN_DEMANDE = r"Demande\s+([IVX]+\.\d+(?:\.[a-z])?)\s*:"
-PATTERN_OBSERVATION = r"Observation\s+n°(\d+)\s*:"
+# Séparateur entre l'identifiant et le texte : ":" ancien style EDF, simple
+# espace nouveau style Orano. `\.?` accepte un point final optionnel (MRS écrit
+# "II.1." au lieu de "II.1"). Le lookahead `(?=[A-Z])` exige que le texte
+# commence par une majuscule (le verbe de la demande), pour éviter les faux
+# positifs où "Demande X.N" apparaît dans le corps d'une phrase.
+PATTERN_DEMANDE = r"Demande\s+([IVX]+\.\d+(?:\.[a-z])?)\.?\s*:?\s+(?=[A-Z])"
+PATTERN_OBSERVATION = r"Observation\s+n°(\d+)\.?\s*:?\s+(?=[A-Z])"
 
 
 def clean_text(raw_text: str) -> str:
@@ -74,24 +95,37 @@ def clean_text(raw_text: str) -> str:
 def split_sections(cleaned_text: str) -> dict[str, str]:
     """Découpe le texte nettoyé en 5 sections logiques.
 
+    Robuste aux marqueurs absents : si un titre n'est pas trouvé, la section
+    correspondante (et celles qui en dépendent comme borne) renvoient "".
+
     Returns:
         dict avec les clés "header", "synthese", "section_I",
         "section_II", "section_III". Une section absente est une chaîne vide.
     """
-
     m_synthese = re.search(PATTERN_SYNTHESE, cleaned_text)
     m_i = re.search(PATTERN_SECTION_I, cleaned_text)
     m_ii = re.search(PATTERN_SECTION_II, cleaned_text)
     m_iii = re.search(PATTERN_SECTION_III, cleaned_text)
 
-    # Pour chaque section on prend [titre_courant.end() : titre_suivant.start()]
-    # afin de récupérer le contenu pur (sans inclure le titre lui-même).
-    header = cleaned_text[: m_synthese.start()].strip()
-    synthese = cleaned_text[m_synthese.end() : m_i.start()].strip()
+    def slice_between(start_match, end_match) -> str:
+        """Renvoie cleaned_text[start_match.end() : end_match.start()] avec fallback."""
+        if start_match is None:
+            return ""
+        start = start_match.end()
+        end = end_match.start() if end_match is not None else len(cleaned_text)
+        return cleaned_text[start:end].strip()
 
-    section1 = cleaned_text[m_i.end() : m_ii.start()].strip()
-    section2 = cleaned_text[m_ii.end() : m_iii.start()].strip()
-    section3 = cleaned_text[m_iii.end() :].strip()
+    # Header = tout ce qui précède SYNTHESE (ou rien si SYNTHESE n'est pas trouvée).
+    header = cleaned_text[: m_synthese.start()].strip() if m_synthese else ""
+
+    # Pour chaque section, le 'next marker' est le premier marqueur trouvé après.
+    next_after_synthese = next((m for m in [m_i, m_ii, m_iii] if m is not None), None)
+    next_after_i = next((m for m in [m_ii, m_iii] if m is not None), None)
+
+    synthese = slice_between(m_synthese, next_after_synthese)
+    section1 = slice_between(m_i, next_after_i)
+    section2 = slice_between(m_ii, m_iii)
+    section3 = slice_between(m_iii, None)
 
     return {
         "header": header,
@@ -190,6 +224,35 @@ def extract_items(sections: dict[str, str]) -> list[dict]:
     return items
 
 
+class TextExtractionError(Exception):
+    """Le texte extrait par pdfplumber est trop corrompu pour être parsé.
+
+    Levée quand la couche texte du PDF est cassée (police custom sans
+    ToUnicode CMap valide → les accents sortent en U+FFFD '�'). Ces PDFs
+    devront être traités par un pipeline OCR séparé (docTR / PaddleOCR).
+    """
+
+
+def _text_is_corrupted(text: str, threshold: float = 0.005) -> bool:
+    """Détecte une couche texte PDF corrompue.
+
+    Le critère : ratio de caractères de remplacement Unicode U+FFFD ('�')
+    par rapport à la longueur totale du texte. Au-delà du seuil (0.5 % par
+    défaut), on considère que l'extraction a échoué et qu'il faut router
+    cette lettre vers un pipeline OCR.
+
+    Args:
+        text: texte extrait par pdfplumber.
+        threshold: ratio de '�' au-dessus duquel on considère le texte cassé.
+
+    Returns:
+        True si le texte est corrompu (= à OCR), False sinon.
+    """
+    if not text:
+        return True
+    return text.count("�") / len(text) > threshold
+
+
 def parse_letter(pdf_path: Path) -> dict:
     """Pipeline complet : PDF d'une lettre ASNR → dict structuré.
 
@@ -201,6 +264,11 @@ def parse_letter(pdf_path: Path) -> dict:
         - 'metadata' : dict renvoyé par extract_header()
         - 'synthese' : str, contenu de la section SYNTHESE
         - 'items'    : list[dict], demandes + observations
+
+    Raises:
+        TextExtractionError: si la couche texte du PDF est corrompue
+            (trop de caractères de remplacement '�'). Ces PDFs doivent
+            être traités par un pipeline OCR séparé.
     """
 
     # On injecte un marqueur " page X" entre les pages : clean_text() s'en sert
@@ -213,6 +281,14 @@ def parse_letter(pdf_path: Path) -> dict:
             parts.append(f" page {i}")
             parts.append(page.extract_text() or "")
         raw = "\n".join(parts)
+
+    if _text_is_corrupted(raw):
+        n_replacements = raw.count("�")
+        raise TextExtractionError(
+            f"Texte extrait corrompu ({n_replacements} caractères '�' "
+            f"sur {len(raw)} = {n_replacements / max(len(raw), 1):.1%}). "
+            "PDF à traiter par pipeline OCR (docTR / PaddleOCR)."
+        )
 
     cleaned = clean_text(raw)
     sections = split_sections(cleaned)

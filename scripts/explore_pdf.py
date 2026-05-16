@@ -8,15 +8,12 @@ from pathlib import Path
 
 import pdfplumber
 
-from services.ml.src.ml import parsing
-
 
 def explore(pdf_path: Path) -> None:
     with pdfplumber.open(pdf_path) as pdf:
         print(f"Nombre de pages:  {len(pdf.pages)}")
         for i, page in enumerate(pdf.pages, start=1):
             text = page.extract_text() or ""
-            text = parsing(text)
             print(f"\n page {i}")
             print(text)
 
