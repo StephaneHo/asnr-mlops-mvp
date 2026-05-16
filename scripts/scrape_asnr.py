@@ -124,24 +124,25 @@ def _parse_listing(html: str) -> list[LetterEntry]:
 def _download_pdf(client: httpx.Client, entry: LetterEntry, dest_dir: Path) -> bool:
     """Télécharge le PDF d'une entrée. Skip s'il existe déjà.
 
-    Retourne True si le fichier a été téléchargé (ou déjà présent), False sur erreur.
+    Retourne True si un appel HTTP a effectivement été fait (pour que l'appelant
+    sache s'il doit respecter le Crawl-delay), False si on a skippé (fichier
+    déjà présent → pas besoin de sleep).
     """
     dest = dest_dir / f"{entry.reference}.pdf"
     entry.pdf_path = str(dest.relative_to(ROOT))
     if dest.exists():
         entry.downloaded = True
         print(f"  • {entry.reference} déjà présent, skip")
-        return True
+        return False  # pas d'appel HTTP → pas besoin de sleep
 
     try:
         resp = _http_get(client, entry.pdf_url)
         dest.write_bytes(resp.content)
         entry.downloaded = True
         print(f"  ✓ {entry.reference} ({len(resp.content) // 1024} Ko)")
-        return True
     except Exception as exc:
         print(f"  ✗ {entry.reference} : {type(exc).__name__}: {exc}")
-        return False
+    return True  # appel HTTP fait (succès ou échec) → on respecte le Crawl-delay
 
 
 def main() -> None:
@@ -191,10 +192,13 @@ def main() -> None:
         all_entries = list(entries_by_ref.values())
 
         # Étape 2 : télécharger chaque PDF (skip si déjà téléchargé).
+        # On ne respecte le Crawl-delay que si on a réellement fait un appel
+        # HTTP — pas la peine d'attendre 10s si le fichier était déjà en cache.
         print(f"\n[Téléchargement] {len(all_entries)} PDFs uniques à traiter")
         for entry in all_entries:
-            _download_pdf(client, entry, PDF_DIR)
-            time.sleep(args.crawl_delay)
+            made_http_request = _download_pdf(client, entry, PDF_DIR)
+            if made_http_request:
+                time.sleep(args.crawl_delay)
 
     # Étape 3 : sauver l'index JSON (toutes les entrées, même celles en échec).
     INDEX_FILE.write_text(
