@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pdfplumber
 
-
 # ---------------------------------------------------------------------------
 # Patterns regex utilisés par les différentes étapes du parser.
 # Regroupés en tête de module pour faciliter la maintenance et la relecture.
@@ -81,18 +80,18 @@ def split_sections(cleaned_text: str) -> dict[str, str]:
     """
 
     m_synthese = re.search(PATTERN_SYNTHESE, cleaned_text)
-    m_I = re.search(PATTERN_SECTION_I, cleaned_text)
-    m_II = re.search(PATTERN_SECTION_II, cleaned_text)
-    m_III = re.search(PATTERN_SECTION_III, cleaned_text)
+    m_i = re.search(PATTERN_SECTION_I, cleaned_text)
+    m_ii = re.search(PATTERN_SECTION_II, cleaned_text)
+    m_iii = re.search(PATTERN_SECTION_III, cleaned_text)
 
     # Pour chaque section on prend [titre_courant.end() : titre_suivant.start()]
     # afin de récupérer le contenu pur (sans inclure le titre lui-même).
     header = cleaned_text[: m_synthese.start()].strip()
-    synthese = cleaned_text[m_synthese.end() : m_I.start()].strip()
+    synthese = cleaned_text[m_synthese.end() : m_i.start()].strip()
 
-    section1 = cleaned_text[m_I.end() : m_II.start()].strip()
-    section2 = cleaned_text[m_II.end() : m_III.start()].strip()
-    section3 = cleaned_text[m_III.end() :].strip()
+    section1 = cleaned_text[m_i.end() : m_ii.start()].strip()
+    section2 = cleaned_text[m_ii.end() : m_iii.start()].strip()
+    section3 = cleaned_text[m_iii.end() :].strip()
 
     return {
         "header": header,

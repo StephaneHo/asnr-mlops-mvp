@@ -37,3 +37,8 @@ markers = [
   "integration: tests d'intégration (bdd, services)",
   "regression: tests de régression ML sur golden set",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.13",
+]
