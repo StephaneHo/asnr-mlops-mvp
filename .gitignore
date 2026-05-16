@@ -41,6 +41,8 @@ pnpm-debug.log*
 *.swp
 *.swo
 *~
+# … sauf le settings.json partagé pour l'auto-format/lint Ruff
+!.vscode/settings.json
 
 # --- OS ---
 Thumbs.db
