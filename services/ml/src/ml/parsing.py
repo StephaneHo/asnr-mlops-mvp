@@ -128,6 +128,60 @@ def extract_header(header_text: str) -> dict[str, str | list[str] | None]:
     }
 
 
+PATTERN_DEMANDE = r"Demande\s+([IVX]+\.\d+(?:\.[a-z])?)\s*:"
+PATTERN_OBSERVATION = r"Observation\s+n°(\d+)\s*:"
+
+
+def _extract_items_from_section(
+    section_text: str,
+    pattern: str,
+    type_item: str,  # "demande" ou "observation"
+    criticite: str,  # "haute", "normale", "faible"
+) -> list[dict]:
+    """Helper : extrait tous les items d'UNE section."""
+    matches = list(re.finditer(pattern, section_text))
+    items = []
+    for i, m in enumerate(matches):
+        # Position de fin du match = début du texte de l'item
+        start = m.end()
+        # Position de début du match suivant = fin du texte de l'item
+        # (ou la fin du texte si c'est le dernier)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(section_text)
+
+        texte = section_text[start:end].strip()
+        identifiant = m.group(1)
+
+        items.append(
+            {
+                "identifiant": identifiant,
+                "type": type_item,
+                "criticite": criticite,
+                "texte": texte,
+            }
+        )
+    return items
+
+
+def extract_items(sections: dict[str, str]) -> list[dict]:
+    """Extrait tous les items (demandes + observations) des 3 sections.
+
+    Args:
+        sections: dict renvoyé par split_sections().
+
+    Returns:
+        liste plate d'items avec leur identifiant, type, criticité, texte.
+    """
+    items = []
+    items += _extract_items_from_section(sections["section_I"], PATTERN_DEMANDE, "demande", "haute")
+    items += _extract_items_from_section(
+        sections["section_II"], PATTERN_DEMANDE, "demande", "normale"
+    )
+    items += _extract_items_from_section(
+        sections["section_III"], PATTERN_OBSERVATION, "observation", "faible"
+    )
+    return items
+
+
 if __name__ == "__main__":
     # Force UTF-8 sur stdout (sinon la redirection '>' sous PowerShell corrompt les accents).
     sys.stdout.reconfigure(encoding="utf-8")
@@ -140,6 +194,11 @@ if __name__ == "__main__":
     for k, v in metadata.items():
         print(f"  {k}: {v}")
 
+    items = extract_items(sections)
+    print(f"\n=== {len(items)} items extraits ===")
+    for item in items:
+        print(f"\n[{item['criticite']:8}] {item['type']} {item['identifiant']}")
+        print(f"  → {item['texte'][:120]}{'…' if len(item['texte']) > 120 else ''}")
     for name, content in sections.items():
         print(f"\n{'=' * 20} {name.upper()} ({len(content)} chars) {'=' * 20}")
         print(content[:300] + ("..." if len(content) > 300 else ""))
