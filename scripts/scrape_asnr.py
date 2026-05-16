@@ -163,7 +163,10 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     PDF_DIR.mkdir(parents=True, exist_ok=True)
 
-    all_entries: list[LetterEntry] = []
+    # On utilise un dict indexé par référence : si plusieurs liens HTML pointent
+    # vers le même PDF (icône PDF + titre cliquable, par exemple), on ne garde
+    # qu'une seule entrée.
+    entries_by_ref: dict[str, LetterEntry] = {}
     headers = {"User-Agent": USER_AGENT}
 
     with httpx.Client(headers=headers, follow_redirects=True) as client:
@@ -176,13 +179,19 @@ def main() -> None:
             except Exception as exc:
                 print(f"  ✗ échec page {page_num}: {exc}")
                 continue
-            entries = _parse_listing(resp.text)
-            print(f"  → {len(entries)} entrées trouvées")
-            all_entries.extend(entries)
+            page_entries = _parse_listing(resp.text)
+            new_count = 0
+            for entry in page_entries:
+                if entry.reference not in entries_by_ref:
+                    entries_by_ref[entry.reference] = entry
+                    new_count += 1
+            print(f"  → {len(page_entries)} liens HTML, {new_count} entrées uniques nouvelles")
             time.sleep(args.crawl_delay)
 
+        all_entries = list(entries_by_ref.values())
+
         # Étape 2 : télécharger chaque PDF (skip si déjà téléchargé).
-        print(f"\n[Téléchargement] {len(all_entries)} PDFs à traiter")
+        print(f"\n[Téléchargement] {len(all_entries)} PDFs uniques à traiter")
         for entry in all_entries:
             _download_pdf(client, entry, PDF_DIR)
             time.sleep(args.crawl_delay)
