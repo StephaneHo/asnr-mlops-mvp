@@ -240,8 +240,13 @@ def extract_anomalie_cascade(
     # Étape 1 — NLI pour le thème
     (theme_nli, theme_nli_score) = classify_theme(item["texte"])
 
-    # Étape 2 — LLM pour les champs en texte libre
-    anomalie_llm = extract_anomalie(item["texte"], client=client, model=model)
+    # Étape 2 — LLM pour les champs en texte libre.
+    # On tronque à ~1000 chars pour la cohérence avec NLI ET pour réduire le
+    # risque de réponse en liste : sur les demandes longues, Phi-3 a tendance
+    # à décomposer en plusieurs actions et à produire `action_attendue` sous
+    # forme de list[str] au lieu de str (ValidationError).
+    texte_tronque = item["texte"][:1000]
+    anomalie_llm = extract_anomalie(texte_tronque, client=client, model=model)
 
     # Étape 3 — Fusion en AnomalieEnrichie
     # TODO 3 : construis un AnomalieEnrichie(...) en passant chaque champ.
