@@ -108,4 +108,9 @@ redis-data/
 
 # --- Artefacts de scripts d'exploration / debug ---
 sample_output.txt
+sample_*.txt
 output*.txt
+
+# --- Notes personnelles (préparation entretien, brouillons) ---
+entretien.md
+notes_perso/
