@@ -23,16 +23,19 @@ from pydantic import BaseModel, Field
 # 1. Schéma Pydantic
 # ---------------------------------------------------------------------------
 
-# 👉 TODO (toi) : enrichir la liste des thèmes possibles d'après ton corpus.
-#    Inspire-toi des sous-titres récurrents de la section II observés dans
-#    les lettres ASNR : "Transport interne", "Arrimage", "Maintenance",
-#    "Préparation du colis", "Organisation", "Radioprotection", etc.
+# Liste enrichie à partir des sous-titres thématiques récurrents observés
+# dans la section II des lettres ASNR du corpus. À ajuster selon les retours
+# d'extraction (si une catégorie est sur-utilisée → la subdiviser).
 ThemeAnomalie = Literal[
     "sûreté",
     "radioprotection",
-    "transport",
+    "transport interne",
     "maintenance",
+    "préparation des colis",
     "organisation",
+    "contrôle technique",
+    "réglementation",
+    "environnement",
     "autre",
 ]
 
@@ -96,13 +99,29 @@ def setup_llm_client() -> instructor.Instructor:
 
 SYSTEM_PROMPT = """\
 Tu es un assistant d'analyse de lettres d'inspection nucléaire française.
-À partir du texte d'une demande émise par l'ASNR (Autorité de Sûreté Nucléaire
-et de Radioprotection), extrais les champs structurés demandés.
+À partir du texte d'une demande émise par l'ASNR, extrais les 4 champs au
+format JSON exact.
+
 RÈGLES STRICTES :
-- Réponds UNIQUEMENT en JSON, sans préambule ni commentaire.
-- `action_attendue` : un verbe à l'infinitif suivi du complément, en moins de 15 mots.
-- `equipements_concernes` : une LISTE de strings, même si un seul élément.
-- `delai_mentionne` : null si aucun délai explicite (sous X mois, avant date, etc.).
+- Produis une INSTANCE de données (pas un schéma JSON : pas de clés
+  "properties", "type", "description" ou "enum" dans ta réponse).
+- `theme` : exactement une des 10 valeurs autorisées par le schéma.
+- `action_attendue` : un verbe à l'infinitif suivi du complément, max 15 mots.
+- `equipements_concernes` : une LISTE de strings, même si un seul élément. [] si rien.
+- `delai_mentionne` : null si aucun délai explicite mentionné dans la demande.
+
+EXEMPLE D'INPUT :
+Vérifier que le verrouillage du bouchon biologique des coques béton C1 et C4
+est bien assuré par des vis serrées au couple indiqué. Assurer dans le temps
+la bonne mise en œuvre du couple de serrage.
+
+EXEMPLE D'OUTPUT (réponse attendue exactement de cette forme) :
+{
+  "theme": "sûreté",
+  "action_attendue": "Vérifier le couple de serrage des vis de verrouillage",
+  "equipements_concernes": ["bouchon biologique", "coques béton C1 et C4", "vis"],
+  "delai_mentionne": null
+}
 """
 
 
@@ -132,5 +151,7 @@ def extract_anomalie(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": demande_text},
         ],
-        max_retries=1,
+        # max_retries=0 : on plante au 1er échec pour mesurer le taux de succès
+        # brut de cette config. Un retry coûte 80s+ avec Phi-3 sur CPU.
+        max_retries=0,
     )
