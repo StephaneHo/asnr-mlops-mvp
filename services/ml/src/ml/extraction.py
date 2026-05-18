@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Literal
 
 import instructor
+from ml.classification import classify_theme
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
@@ -66,6 +67,63 @@ class Anomalie(BaseModel):
     delai_mentionne: str | None = Field(
         None,
         description="Délai explicitement indiqué dans la demande (ex: 'sous deux mois'). None si absent.",
+    )
+
+
+class AnomalieEnrichie(BaseModel):
+    """Résultat de la cascade NLI + LLM pour un item du parser.
+
+    Représentation 'production-ready' : contient tout ce qu'il faut pour
+    stocker en base et tracer le pipeline.
+
+    Le `theme_nli` (NLI mDeBERTa) et `theme_llm` (Phi-3 via Instructor) sont
+    conservés tous les deux pour permettre de comparer / choisir / fallback
+    en aval. NLI a une meilleure diversité de classification, LLM est utile
+    quand NLI tombe sur "autre" (score < 0.5).
+    """
+
+    # --- Identité et traçabilité ---
+    identifiant: str = Field(
+        ...,
+        description="Identifiant unique de la demande/observation dans la lettre (ex: 'II.4.b', 'n°1').",
+    )
+    criticite: str = Field(
+        ...,
+        description="Criticité héritée de la section : 'haute' (I), 'normale' (II), 'faible' (III).",
+    )
+    texte_source: str = Field(
+        ...,
+        description="Texte original complet de la demande, pour traçabilité et debug.",
+    )
+
+    # --- Classification thème (deux sources gardées séparément) ---
+    theme_nli: str = Field(
+        ...,
+        description="Thème prédit par mDeBERTa zero-shot NLI (descriptif, ex: 'radioprotection et irradiation').",
+    )
+    theme_nli_score: float = Field(
+        ...,
+        description="Confiance du modèle NLI sur theme_nli (0-1).",
+        ge=0.0,
+        le=1.0,
+    )
+    theme_llm: str = Field(
+        ...,
+        description="Thème prédit par le LLM Phi-3 (libellé court, ex: 'sûreté').",
+    )
+
+    # --- Champs extraits par le LLM ---
+    action_attendue: str = Field(
+        ...,
+        description="Verbe d'action que l'exploitant doit accomplir, à l'infinitif.",
+    )
+    equipements_concernes: list[str] = Field(
+        default_factory=list,
+        description="Liste des équipements / processus / documents cités.",
+    )
+    delai_mentionne: str | None = Field(
+        None,
+        description="Délai explicite mentionné dans la demande (ex: 'sous deux mois'). None sinon.",
     )
 
 
@@ -154,4 +212,66 @@ def extract_anomalie(
         # max_retries=0 : on plante au 1er échec pour mesurer le taux de succès
         # brut de cette config. Un retry coûte 80s+ avec Phi-3 sur CPU.
         max_retries=0,
+    )
+
+
+def extract_anomalie_cascade(
+    item: dict,
+    client: instructor.Instructor,
+    model: str = "phi3:mini",
+) -> AnomalieEnrichie:
+    """Cascade NLI + LLM : transforme un item du parser en AnomalieEnrichie.
+
+    Pipeline :
+      1. NLI (classify_theme)  → theme_nli, theme_nli_score
+      2. LLM (extract_anomalie) → action_attendue, equipements, delai, theme_llm
+      3. Fusion + héritage de la criticité du parser → AnomalieEnrichie
+
+    Args:
+        item: dict renvoyé par parse_letter()["items"][i]. Doit contenir
+              les clés "identifiant", "criticite", "texte".
+        client: client Instructor configuré (cf. setup_llm_client).
+        model: nom du modèle Ollama pour le LLM. Défaut: phi3:mini.
+
+    Returns:
+        AnomalieEnrichie prête à être stockée.
+    """
+
+    # Étape 1 — NLI pour le thème
+    (theme_nli, theme_nli_score) = classify_theme(item["texte"])
+
+    # Étape 2 — LLM pour les champs en texte libre
+    anomalie_llm = extract_anomalie(item["texte"], client=client, model=model)
+
+    # Étape 3 — Fusion en AnomalieEnrichie
+    # TODO 3 : construis un AnomalieEnrichie(...) en passant chaque champ.
+    #          Sources :
+    #            - identifiant, criticite, texte_source → depuis `item`
+    #            - theme_nli, theme_nli_score → depuis les variables de l'étape 1
+    #            - theme_llm, action_attendue, equipements_concernes, delai_mentionne
+    #              → depuis l'objet `anomalie_llm` (accès par attributs, pas par clés)
+    identifiant = item["identifiant"]
+
+    criticite = item["criticite"]
+
+    texte_source = item["texte"]
+
+    action_attendue = anomalie_llm.action_attendue
+
+    equipements_concernes = anomalie_llm.equipements_concernes
+
+    delai_mentionne = anomalie_llm.delai_mentionne
+
+    theme_llm = anomalie_llm.theme
+
+    return AnomalieEnrichie(
+        identifiant=identifiant,
+        criticite=criticite,
+        texte_source=texte_source,
+        action_attendue=action_attendue,
+        equipements_concernes=equipements_concernes,
+        delai_mentionne=delai_mentionne,
+        theme_nli=theme_nli,
+        theme_nli_score=theme_nli_score,
+        theme_llm=theme_llm,
     )
