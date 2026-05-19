@@ -1,0 +1,32 @@
+# Stack locale (MVP) : Postgres avec extension pgvector pour le stockage
+# et la recherche semantique des anomalies enrichies.
+#
+# Lancement :   docker compose up -d
+# Arret :       docker compose down
+# Reset total : docker compose down -v   (supprime aussi le volume = perte des donnees)
+#
+# Mot de passe et port volontairement triviaux : c'est du dev local, jamais expose.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: asnr-postgres
+    environment:
+      POSTGRES_DB: asnr
+      POSTGRES_USER: asnr
+      POSTGRES_PASSWORD: asnr_dev_password
+    ports:
+      # 5432 deja occupe par un autre conteneur Postgres local (projet rag).
+      # On expose donc asnr-postgres sur le port host 5433.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asnr -d asnr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
