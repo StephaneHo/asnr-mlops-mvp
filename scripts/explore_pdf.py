@@ -1,5 +1,6 @@
-"""Explore le contenu texte d'une lettre ASNR via pdfplumber.
-Exemple:
+"""Affiche le texte brut d'une lettre ASNR extrait par pdfplumber.
+
+Usage:
     uv run python scripts/explore_pdf.py data/raw/asnr/INSSN-CAE-2026-0206.pdf
 """
 
@@ -11,7 +12,7 @@ import pdfplumber
 
 def explore(pdf_path: Path) -> None:
     with pdfplumber.open(pdf_path) as pdf:
-        print(f"Nombre de pages:  {len(pdf.pages)}")
+        print(f"Nombre de pages : {len(pdf.pages)}")
         for i, page in enumerate(pdf.pages, start=1):
             text = page.extract_text() or ""
             print(f"\n page {i}")
@@ -19,8 +20,7 @@ def explore(pdf_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    # Force UTF-8 on stdout — sinon, sous PowerShell Windows, Python écrit en
-    # cp1252 et les accents/apostrophes typographiques sont corrompus à la
-    # redirection ('>') ou à la lecture par un outil supposant de l'UTF-8.
+    # Force UTF-8 sur stdout : sinon la redirection PowerShell ('>') corrompt
+    # les accents et apostrophes typographiques.
     sys.stdout.reconfigure(encoding="utf-8")
     explore(Path(sys.argv[1]))
