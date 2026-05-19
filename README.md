@@ -14,11 +14,10 @@ Les lettres d'inspection ASNR sont publiques et structurées :
 - **Section II — Autres demandes** → criticité normale
 - **Section III — Constats ou observations n'appelant pas de réponse** → criticité faible
 
-Cette structure fournit une **supervision faible naturelle** : on peut
-entraîner et évaluer un pipeline d'extraction d'anomalies **sans annotation
-manuelle**, en utilisant les sections I/II/III comme vérité terrain. Chaque
-item porte un identifiant unique (`Demande II.4.b`, `Observation n°1`), une
-criticité héritée de sa section, et son texte intégral.
+Cette structure tient lieu de **supervision faible** : les sections I/II/III
+servent de vérité terrain sans annotation manuelle. Chaque item porte un
+identifiant (`Demande II.4.b`, `Observation n°1`), une criticité héritée de
+la section, et son texte intégral.
 
 Le projet vise à démontrer une chaîne MLOps complète sur ce cas d'usage :
 
@@ -79,8 +78,9 @@ Le point d'entrée unique est `parse_letter(pdf_path)` qui orchestre tout
 
 ## Pipeline ML (cascade NLI + LLM)
 
-Chaque item du parser est ensuite enrichi par une **cascade à deux étages** qui
-combine la rapidité du NLI zero-shot et la richesse du LLM local :
+Chaque item du parser est enrichi par une cascade à deux étages : NLI
+zero-shot pour la classification thématique, LLM local pour les champs en
+texte libre.
 
 ```
 item du parser
@@ -122,23 +122,23 @@ Le point d'entrée est `extract_anomalie_cascade(item, client)` dans
 `theme_nli` et `theme_llm` sont conservés en parallèle dans `AnomalieEnrichie`.
 Justification :
 
-- NLI est **plus discriminant** sur les vraies catégories (II.2.a a été classé
-  correctement en `radioprotection` par NLI alors que LLM s'est laissé piéger
-  par le mot "régulations").
-- LLM est **plus tolérant** quand le texte ne correspond à aucune catégorie
-  claire (II.1.a : NLI tombe en `"autre"`, LLM tranche en `"sûreté"`).
-- La **divergence elle-même est un signal** : items à reviewer en priorité.
+- NLI a classé II.2.a en `radioprotection`, là où le LLM a renvoyé
+  `réglementation` (probablement biaisé par le mot "régulations" du texte
+  source).
+- À l'inverse, sur II.1.a, NLI est tombé en fallback `autre` (score 0.41 <
+  seuil 0.5) tandis que le LLM a renvoyé `sûreté`.
+- La divergence est utilisable comme indicateur de doute : ces items peuvent
+  être priorisés pour une relecture humaine.
 
 ### Limites connues du LLM Phi-3 sur CPU
 
-Tolérées au stade MVP, à raffiner ensuite :
+Limites observées au stade MVP :
 
-- Hallucinations légères dans `action_attendue` (ex : `"réviser l0e
-  l'étiquetage"`, fusion `0`/`o`).
-- Verbose : `action_attendue` dépasse parfois la consigne "max 15 mots" du
-  prompt.
-- Tout est mis en `"sûreté"` quand le LLM est utilisé seul (corrigé par la
-  cascade : c'est NLI qui porte le vrai signal de thème).
+- `action_attendue` contient parfois des erreurs typographiques générées par
+  Phi-3 (ex : `"réviser l0e l'étiquetage"`).
+- La consigne "max 15 mots" du prompt n'est pas toujours respectée.
+- Le LLM utilisé seul classe la plupart des demandes en `sûreté` — c'est pour
+  ça que la cascade délègue la classification à NLI.
 
 ## Stack cible
 
@@ -179,8 +179,7 @@ uv run python scripts/scrape_asnr.py --max-pages 15
 uv run python scripts/validate_parser.py --summary
 ```
 
-À la fin de la validation, tu auras le bilan exact (volume, complétude,
-couverture) sur ton corpus.
+Le script affiche le bilan complet (volume, complétude, couverture).
 
 ## Structure du repo
 
