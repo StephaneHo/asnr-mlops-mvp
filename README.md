@@ -3,8 +3,9 @@
 Pipeline MLOps d'ingestion et d'extraction d'anomalies depuis les lettres
 d'inspection de l'ASNR (Autorité de Sûreté Nucléaire et de Radioprotection).
 
-**Statut :** parser PDF + scraper + cascade NLI/LLM validés ; embeddings et
-stockage à venir.
+**Statut :** pipeline complet validé bout-en-bout — parser PDF, scraper,
+cascade NLI/LLM, embeddings E5, stockage Postgres + pgvector, recherche
+sémantique. API et frontend à venir.
 
 ## Idée
 
@@ -140,6 +141,56 @@ Limites observées au stade MVP :
 - Le LLM utilisé seul classe la plupart des demandes en `sûreté` — c'est pour
   ça que la cascade délègue la classification à NLI.
 
+## Stockage et recherche sémantique (Postgres + pgvector)
+
+Chaque `AnomalieEnrichie` est complétée par un **embedding 384D** (E5
+multilingue, prefixe `passage:`) puis stockée dans Postgres avec l'extension
+pgvector. Un index HNSW sur la colonne `embedding` permet la recherche par
+similarité cosinus en quelques millisecondes.
+
+```
+PDF -> parse_letter -> extract_anomalie_cascade -> embed_anomalie
+                                                       │
+                                                       ▼
+                                      INSERT anomalies (... embedding VECTOR(384))
+                                                       │
+                                                       ▼ (operateur <=>)
+                                              recherche cosinus indexee HNSW
+```
+
+Le schéma SQL est dans [infra/init-db.sql](infra/init-db.sql), chargé
+automatiquement au premier `docker compose up -d` via
+`/docker-entrypoint-initdb.d/`. Le module d'accès est
+[services/ml/src/ml/store.py](services/ml/src/ml/store.py).
+
+### Validation de la recherche
+
+Test sur les 3 anomalies de la lettre Penly, avec 3 requêtes en langage
+naturel via [scripts/test_search.py](scripts/test_search.py) :
+
+| Requête | Distance #1 | Distance #2 | Distance #3 | Gap #1→#3 |
+|---|---|---|---|---|
+| "couple de serrage des vis" | **0.117** | 0.192 | 0.204 | 0.086 |
+| "irradiation et radioprotection" | **0.141** | 0.149 | 0.182 | 0.041 |
+| "incident sismique sur une centrale" (hors sujet) | 0.206 | 0.212 | 0.220 | **0.014** |
+
+Deux signaux exploitables en aval :
+
+- **Distance #1 absolue** : reflète la pertinence du meilleur match
+  (0.117 = match fort, 0.206 = aucun match vraiment proche).
+- **Gap #1→#3 (tassement)** : reflète la confiance dans le tri. Un gap
+  inférieur à ~0.03 indique que la requête n'a pas de cible claire dans
+  le corpus — on peut alors choisir de répondre "aucun résultat pertinent"
+  plutôt que de remonter du bruit.
+
+### Idempotence et robustesse
+
+- Index unique `(lettre, identifiant)` + `ON CONFLICT DO NOTHING` :
+  le pipeline est rejouable sans créer de doublons.
+- Le batch utilise un `try/except` autour de la cascade pour ne pas planter
+  tout le lot quand Phi-3 échoue ponctuellement la validation Pydantic.
+  La sortie logue `[INS]` / `[DUP]` / `[FAIL]` par item.
+
 ## Stack cible
 
 100 % open-source, 100 % on-prem, CPU-only. Aucune dépendance à une API
@@ -152,8 +203,8 @@ externe payante.
 | NLI zero-shot | mDeBERTa-v3-base-mnli-xnli | ✅ implémenté |
 | Typage structuré | Pydantic + Instructor | ✅ implémenté |
 | LLM local | Phi-3-mini / Mistral-7B Q4 via Ollama | ✅ implémenté |
-| Embeddings | sentence-transformers (paraphrase-multilingual-MiniLM) | ⏳ à venir |
-| Vector store | pgvector dans PostgreSQL | ⏳ à venir |
+| Embeddings | sentence-transformers (intfloat/multilingual-e5-small) | ✅ implémenté |
+| Vector store | pgvector dans PostgreSQL 16 | ✅ implémenté |
 | Storage objets | MinIO | ⏳ à venir |
 | API | FastAPI | ⏳ à venir |
 | Workers asynchrones | Celery + Redis | ⏳ à venir |
@@ -166,7 +217,8 @@ externe payante.
 
 ## Démarrage rapide
 
-Pré-requis : Python 3.11+, [uv](https://docs.astral.sh/uv/) installé.
+Pré-requis : Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker Desktop,
+[Ollama](https://ollama.com/) avec `phi3:mini` (`ollama pull phi3:mini`).
 
 ```powershell
 # 1. Installer les dépendances dans .venv
@@ -177,9 +229,16 @@ uv run python scripts/scrape_asnr.py --max-pages 15
 
 # 3. Évaluer le parser sur tout le corpus téléchargé
 uv run python scripts/validate_parser.py --summary
-```
 
-Le script affiche le bilan complet (volume, complétude, couverture).
+# 4. Démarrer Postgres + pgvector (init-db.sql joué au premier up)
+docker compose up -d
+
+# 5. Pipeline complet : parser -> cascade -> embedding -> INSERT
+uv run python scripts/run_full_pipeline.py --n 5
+
+# 6. Recherche sémantique sur la base
+uv run python scripts/test_search.py --query "couple de serrage des vis"
+```
 
 ## Structure du repo
 
@@ -187,20 +246,31 @@ Le script affiche le bilan complet (volume, complétude, couverture).
 asnr-mlops-mvp/
 ├── data/raw/asnr/              # PDFs téléchargés (ignoré par git)
 ├── docs/                       # ADRs, architecture, model cards
-├── infra/                      # configs Prometheus, Grafana (à venir)
+├── infra/
+│   └── init-db.sql             # schema anomalies + extension pgvector + index HNSW
 ├── pipelines/                  # flows Prefect (à venir)
 ├── scripts/
 │   ├── scrape_asnr.py          # télécharge listing + PDFs ASNR
 │   ├── validate_parser.py      # rapport d'évaluation du parser
-│   └── explore_pdf.py          # debug : extraction texte d'un PDF
+│   ├── explore_pdf.py          # debug : extraction texte d'un PDF
+│   ├── test_classification.py  # test NLI sur quelques items
+│   ├── test_extraction.py      # test LLM (extract_anomalie) sur un item
+│   ├── test_cascade.py         # test extract_anomalie_cascade end-to-end
+│   ├── test_embeddings.py      # similarité cosinus E5 sur 3 demandes
+│   ├── pipeline_e2e.py         # parse -> cascade -> embed (sortie JSON, sans DB)
+│   ├── run_full_pipeline.py    # pipeline complet avec insertion Postgres
+│   └── test_search.py          # recherche sémantique sur la base
 ├── services/
 │   ├── api/                    # FastAPI (à venir)
 │   ├── frontend/               # React + Vite (à venir)
 │   ├── ml/src/ml/
 │   │   ├── parsing.py          # parser PDF → dict structuré
 │   │   ├── classification.py   # NLI zero-shot (mDeBERTa) pour le thème
-│   │   └── extraction.py       # LLM + Instructor → AnomalieEnrichie
+│   │   ├── extraction.py       # LLM + Instructor → AnomalieEnrichie
+│   │   ├── embeddings.py       # E5 multilingue (384D), prefixes passage:/query:
+│   │   └── store.py            # accès Postgres + pgvector (insert, search)
 │   └── worker/                 # Celery (à venir)
+├── docker-compose.yml          # service postgres (pgvector/pgvector:pg16, port 5433)
 ├── tests/                      # unit / integration / regression (à venir)
 └── .pre-commit-config.yaml     # ruff lint + format avant commit
 ```
