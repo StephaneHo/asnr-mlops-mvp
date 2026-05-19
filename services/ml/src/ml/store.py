@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 
+import numpy as np
 import psycopg
 from ml.extraction import AnomalieEnrichie
 from pgvector.psycopg import register_vector
@@ -110,6 +111,11 @@ def search_similar(
         LIMIT %s
     """
 
+    # pgvector-python convertit numpy.ndarray -> VECTOR mais pas list[float].
+    # Sans ce cast, Postgres reçoit un double precision[] et l'operateur
+    # <=> rejette ("operator does not exist: vector <=> double precision[]").
+    vec = np.asarray(query_vector, dtype=np.float32)
+
     with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-        cur.execute(sql, (query_vector, query_vector, limit))
+        cur.execute(sql, (vec, vec, limit))
         return cur.fetchall()

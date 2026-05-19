@@ -30,3 +30,15 @@ def embed_text(text: str) -> list[float]:
 def embed_anomalie(anomalie: AnomalieEnrichie) -> list[float]:
     """Encode le texte source d'une AnomalieEnrichie."""
     return embed_text(anomalie.texte_source)
+
+
+def embed_query(text: str) -> list[float]:
+    """Encode une requete utilisateur (asymmetric retrieval).
+
+    E5 exige le prefixe 'query: ' pour les questions (vs 'passage: ' pour
+    les documents indexes). Sans ce bon prefixe, les performances chutent
+    de ~10-15 %.
+    """
+    embedder = get_embedder()
+    vector = embedder.encode("query: " + text, normalize_embeddings=True)
+    return vector.tolist()
