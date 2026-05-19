@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 # Permet d'importer ml.* sans installer le package (cohérent avec les scripts).
@@ -116,6 +117,14 @@ class SearchResponse(BaseModel):
 # ----------------------------------------------------------------------
 
 app = FastAPI(title="ASNR Anomalies API", version="0.1.0")
+
+# Autorise le frontend Vite (dev) a appeler l'API depuis une origine differente.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
