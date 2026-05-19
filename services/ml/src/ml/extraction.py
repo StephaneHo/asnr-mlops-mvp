@@ -27,18 +27,29 @@ ThemeAnomalie = Literal[
 class Anomalie(BaseModel):
     """Schema attendu en sortie du LLM (1 demande ou observation extraite)."""
 
-    theme: ThemeAnomalie = Field(..., description="Theme principal de l'anomalie.")
+    theme: ThemeAnomalie = Field(
+        ...,
+        description="Theme principal de l'anomalie.",
+        examples=["sûreté", "radioprotection", "transport interne"],
+    )
     action_attendue: str = Field(
         ...,
-        description="Verbe d'action a l'infinitif + complement (verifier, mettre en place, etc.).",
+        description="Verbe d'action a l'infinitif + complement.",
+        examples=[
+            "Vérifier le couple de serrage des vis",
+            "Compléter le plan qualité",
+            "Transmettre la justification",
+        ],
     )
     equipements_concernes: list[str] = Field(
         default_factory=list,
         description="Equipements / processus / documents cites. Liste vide si rien.",
+        examples=[["bouchon biologique", "coques béton C1 et C4", "vis"]],
     )
     delai_mentionne: str | None = Field(
         None,
-        description="Delai explicite dans la demande (ex: 'sous deux mois'). None si absent.",
+        description="Delai explicite dans la demande. None si absent.",
+        examples=["sous deux mois", None],
     )
 
 
@@ -49,17 +60,57 @@ class AnomalieEnrichie(BaseModel):
     leur divergence est un signal de doute (items a reviewer en priorite).
     """
 
-    identifiant: str = Field(..., description="ID dans la lettre (ex: 'II.4.b').")
-    criticite: str = Field(..., description="'haute' (I), 'normale' (II), 'faible' (III).")
-    texte_source: str = Field(..., description="Texte original de la demande.")
+    identifiant: str = Field(
+        ...,
+        description="ID dans la lettre.",
+        examples=["II.4.b", "n°1"],
+    )
+    criticite: str = Field(
+        ...,
+        description="Niveau hérité de la section : I/II/III.",
+        examples=["haute", "normale", "faible"],
+    )
+    texte_source: str = Field(
+        ...,
+        description="Texte original de la demande.",
+        examples=["Vérifier que le verrouillage du bouchon biologique..."],
+    )
 
-    theme_nli: str = Field(..., description="Theme predit par NLI mDeBERTa.")
-    theme_nli_score: float = Field(..., description="Confiance NLI (0-1).", ge=0.0, le=1.0)
-    theme_llm: str = Field(..., description="Theme predit par le LLM Phi-3.")
+    theme_nli: str = Field(
+        ...,
+        description="Theme predit par NLI mDeBERTa (libellé descriptif).",
+        examples=[
+            "radioprotection et irradiation",
+            "transport interne de substances radioactives",
+            "autre",
+        ],
+    )
+    theme_nli_score: float = Field(
+        ...,
+        description="Confiance NLI (0-1). Fallback 'autre' si < 0.5.",
+        ge=0.0,
+        le=1.0,
+        examples=[0.746, 0.41],
+    )
+    theme_llm: str = Field(
+        ...,
+        description="Theme predit par le LLM Phi-3 (libellé court).",
+        examples=["sûreté", "radioprotection", "transport interne"],
+    )
 
-    action_attendue: str = Field(..., description="Verbe d'action a l'infinitif.")
-    equipements_concernes: list[str] = Field(default_factory=list)
-    delai_mentionne: str | None = Field(None)
+    action_attendue: str = Field(
+        ...,
+        description="Verbe d'action a l'infinitif + complement.",
+        examples=["Vérifier le couple de serrage des vis", "Compléter le plan qualité"],
+    )
+    equipements_concernes: list[str] = Field(
+        default_factory=list,
+        examples=[["bouchon biologique", "coques béton C1 et C4", "vis"]],
+    )
+    delai_mentionne: str | None = Field(
+        None,
+        examples=["sous deux mois", None],
+    )
 
 
 def setup_llm_client() -> instructor.Instructor:
