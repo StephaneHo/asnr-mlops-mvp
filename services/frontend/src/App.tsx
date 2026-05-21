@@ -1,4 +1,7 @@
 import { useState, Suspense } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "react-error-boundary";
 
@@ -28,78 +31,93 @@ interface SearchResponse {
   elapsed_ms: number;
 }
 
-// ---------------------------------------------------------------
-// Fonction de fetch pure (queryFn).
-// ---------------------------------------------------------------
+// Schéma de validation du formulaire (cote front, equivalent du Pydantic backend).
+const searchSchema = z.object({
+  query: z.string().trim().min(1, "La query ne peut pas etre vide"),
+});
 
-// TODO F3a : implementer fetchSearch.
-// Etapes :
-//   1. await fetch(`${API_URL}/search?query=${encodeURIComponent(query)}&k=3`)
-//   2. if (!response.ok) throw new Error(`HTTP ${response.status}`)
-//   3. return response.json() (typee SearchResponse grace au return type).
+type SearchInput = z.infer<typeof searchSchema>;
+
 async function fetchSearch(query: string): Promise<SearchResponse> {
-  // TODO F3a
-  throw new Error("not implemented");
+  const response = await fetch(`${API_URL}/search?query=${encodeURIComponent(query)}&k=3`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json() as Promise<SearchResponse>;
+
 }
 
-// ---------------------------------------------------------------
-// Composant <Results> : consomme useSuspenseQuery, assume data presente.
-// ---------------------------------------------------------------
-
 function Results({ query }: { query: string }) {
-  // TODO F3b : useSuspenseQuery.
-  // Indice :
-  //   const { data } = useSuspenseQuery<SearchResponse>({
-  //     queryKey: ["search", query],
-  //     queryFn: () => fetchSearch(query),
-  //   });
-  // queryKey est cle de cache : memes args -> meme cache, retour instantane.
-
+  const { data } = useSuspenseQuery<SearchResponse>({
+    queryKey: ["search", query],
+    queryFn: () => fetchSearch(query),
+  });
   // TODO F4c : rendu des hits.
-  // Structure suggeree :
-  //   - 1 ligne de resume : "{N} resultats - tassement: X - {Y}ms"
-  //   - data.results.map((hit, i) => (...)) avec identifiant, lettre,
-  //     criticite (badge), extrait, distance, theme_nli, theme_llm.
-  //   - Tailwind : space-y-3, chaque carte p-4 bg-white border rounded-md.
+  // - 1 ligne resume : "{N} resultats - tassement: X - {Y}ms"
+  const { results, tassement, elapsed_ms } = data
+
+  const updatedResults = results.map((hit, _) => (<div key={`${hit.lettre}-${hit.identifiant}`}>{hit.extrait}</div>))
   return (
-    <div className="text-slate-500">TODO F4c : afficher les resultats</div>
+    <div className="space-y-3">
+      <p className="text-sm text-slate-600">
+        {results.length} résultats · tassement {tassement?.toFixed(3) ?? "N/A"} · {elapsed_ms} ms
+      </p>
+      {updatedResults}
+    </div>
   );
 }
 
 // ---------------------------------------------------------------
-// App : etat UI + composition Suspense/ErrorBoundary autour de <Results>.
+// App : form RHF + Zod, etat submittedQuery, composition Suspense/ErrorBoundary.
 // ---------------------------------------------------------------
 
 function App() {
-  // TODO F2 : 2 useState.
-  //   - query: string ("" au depart) - ce qui est dans l'input
-  //   - submittedQuery: string | null (null au depart) - ce qu'on a soumis.
-  //   submittedQuery declenche le rendu de <Results> (et donc le fetch Suspense).
+  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+
+
+  const { register, handleSubmit, formState: { errors } } = useForm<SearchInput>({
+    resolver: zodResolver(searchSchema),
+  });
+  // - register("query") : a splatter sur l'input pour le brancher au form
+  // - handleSubmit(onValid) : wrapper qui valide AVANT d'appeler onValid
+  // - errors.query : objet ZodIssue si la validation a echoue (ou undefined)
+
+  const onValid = (data: SearchInput) => {
+    setSubmittedQuery(data.query);
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <h1 className="text-3xl font-bold">Recherche d'anomalies ASNR</h1>
 
-        {/* TODO F4a : barre de recherche.
-            - <input value={query} onChange={(e) => setQuery(e.target.value)}>
-              placeholder "Tapez votre requete..."
-              Tailwind : flex-1 px-4 py-2 border border-slate-300 rounded-md
-            - <button onClick={() => setSubmittedQuery(query)}>
-              Tailwind : px-6 py-2 bg-blue-600 text-white rounded-md
-            - parent <div className="flex gap-2"> */}
 
-        {/* TODO F4b : rendu conditionnel sur submittedQuery.
-            Pattern :
-              {submittedQuery !== null && (
-                <ErrorBoundary fallbackRender={({ error }) => <ErrorBox msg={...} />}>
-                  <Suspense fallback={<div>Recherche en cours...</div>}>
-                    <Results query={submittedQuery} />
-                  </Suspense>
-                </ErrorBoundary>
-              )}
-            Indice : la prop `fallbackRender` recoit {error, resetErrorBoundary}.
-            Tu peux soit creer un sous-composant <ErrorBox/>, soit ecrire le JSX inline. */}
+        <form onSubmit={handleSubmit(onValid)} className="space-y-2">
+          <div className="flex gap-2">
+            <input {...register("query")} placeholder="..."
+              className="flex-1 px-4 py-2 border border-slate-300 rounded-md" />
+            <button type="submit"
+              className="px-6 py-2 bg-blue-600 text-white rounded-md">
+              Rechercher
+            </button>
+          </div>
+          {errors.query && <p className="text-red-600 text-sm">{errors.query.message}</p>}
+        </form>
+
+
+
+        {submittedQuery !== null && (
+          <ErrorBoundary fallbackRender={({ error }) => (
+            <div className="p-4 bg-red-50 text-red-700 rounded-md">
+              Erreur : {String(error)}
+            </div>
+          )}>
+            <Suspense fallback={
+              <div className="p-4 text-slate-500">Recherche en cours...</div>
+            }>
+              <Results query={submittedQuery} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+
       </div>
     </div>
   );
