@@ -1,9 +1,9 @@
-# Stack locale (MVP) : Postgres avec extension pgvector pour le stockage
-# et la recherche semantique des anomalies enrichies.
+# Stack locale (MVP) : Postgres+pgvector pour les anomalies, MinIO comme
+# artifact store S3-compatible, MLflow tracking server avec backend Postgres.
 #
-# Lancement :   docker compose up -d
+# Lancement :   docker compose up -d --build
 # Arret :       docker compose down
-# Reset total : docker compose down -v   (supprime aussi le volume = perte des donnees)
+# Reset total : docker compose down -v   (supprime aussi les volumes = perte des donnees)
 #
 # Mot de passe et port volontairement triviaux : c'est du dev local, jamais expose.
 
@@ -28,5 +28,66 @@ services:
       timeout: 5s
       retries: 10
 
+  # MinIO : object store S3-compatible pour les artifacts MLflow.
+  # En prod on remplacerait par S3/GCS/Azure Blob ; l'API est identique.
+  minio:
+    image: minio/minio
+    container_name: asnr-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: asnr_minio
+      MINIO_ROOT_PASSWORD: asnr_minio_password
+    ports:
+      - "9000:9000"  # API S3
+      - "9001:9001"  # Console web
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Job one-shot : cree le bucket "mlflow-artifacts" au premier demarrage.
+  # Une fois termine, le conteneur s'arrete (depends_on: service_completed_successfully).
+  minio-init:
+    image: minio/mc
+    container_name: asnr-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 asnr_minio asnr_minio_password &&
+      mc mb --ignore-existing local/mlflow-artifacts &&
+      exit 0
+      "
+
+  # MLflow tracking server : metadata dans Postgres (base mlflow), artifacts dans MinIO.
+  # UI accessible sur http://localhost:5000.
+  mlflow:
+    build: ./infra/mlflow
+    container_name: asnr-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # Endpoint MinIO (cote container : DNS service interne).
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      # Credentials S3-compatible pour boto3.
+      AWS_ACCESS_KEY_ID: asnr_minio
+      AWS_SECRET_ACCESS_KEY: asnr_minio_password
+    ports:
+      - "5000:5000"
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://asnr:asnr_dev_password@postgres:5432/mlflow
+      --artifacts-destination s3://mlflow-artifacts
+      --host 0.0.0.0
+      --port 5000
+
 volumes:
   postgres_data:
+  minio_data:

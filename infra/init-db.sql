@@ -1,7 +1,12 @@
--- Schema initial de la base asnr.
+-- Schema initial de la base asnr + base auxiliaire mlflow.
 -- Charge automatiquement par Postgres au 1er demarrage du conteneur
 -- (montage sur /docker-entrypoint-initdb.d/, cf. docker-compose.yml).
 
+-- Base separee pour le tracking MLflow (metadata des runs).
+-- Le serveur MLflow s'y connecte avec le meme user/password que asnr.
+CREATE DATABASE mlflow OWNER asnr;
+
+-- Suite : on opere dans la base asnr (POSTGRES_DB).
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS anomalies (
